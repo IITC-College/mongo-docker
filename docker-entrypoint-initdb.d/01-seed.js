@@ -1,61 +1,60 @@
-// Part 7 — Database initialization script (reference solution)
+// Database initialization script — PROVIDED, do not modify.
 //
-// Runs only when MongoDB starts with an EMPTY data directory (fresh volume).
-// Seeds an e-commerce dataset into the `appdb` database.
+// MongoDB runs every .js / .sh file in /docker-entrypoint-initdb.d/
+// ONLY when it starts with an EMPTY data directory (a fresh volume).
+//
+// Your job is NOT to write this file. Your job is to wire it into your
+// image (via the Dockerfile) so MongoDB executes it on first start, then
+// prove the seeded data persists across container removal.
 
 const appdb = db.getSiblingDB('appdb');
 
-// --- users ---
-const users = [
-  { _id: 1, name: 'Alice Cohen',  email: 'alice@example.com',  createdAt: new Date() },
-  { _id: 2, name: 'Bob Levi',     email: 'bob@example.com',     createdAt: new Date() },
-  { _id: 3, name: 'Carol Mizrahi',email: 'carol@example.com',   createdAt: new Date() },
-];
-appdb.users.insertMany(users);
+// --- application DB user ---
+// The root user (MONGO_INITDB_ROOT_*) is for admin only. Real apps connect
+// with a least-privilege user scoped to their own database. Create one here
+// so the backend team connects as `appuser`, not root.
+appdb.createUser({
+  user: 'appuser',
+  pwd: 'appsecret',
+  roles: [{ role: 'readWrite', db: 'appdb' }],
+});
+
+// --- sample users ---
+appdb.users.insertMany([
+  { _id: 1, name: 'Alice Cohen',   email: 'alice@example.com', createdAt: new Date() },
+  { _id: 2, name: 'Bob Levi',      email: 'bob@example.com',   createdAt: new Date() },
+  { _id: 3, name: 'Carol Mizrahi', email: 'carol@example.com', createdAt: new Date() },
+]);
 
 // --- products ---
-const products = [
+appdb.products.insertMany([
   { _id: 101, name: 'Mechanical Keyboard', price: 349.90, stock: 25 },
   { _id: 102, name: 'USB-C Hub',           price: 129.00, stock: 60 },
   { _id: 103, name: '27" Monitor',         price: 1299.00, stock: 12 },
   { _id: 104, name: 'Webcam 1080p',        price: 219.50, stock: 40 },
-];
-appdb.products.insertMany(products);
+]);
 
 // --- orders --- (reference users + products)
-const orders = [
+appdb.orders.insertMany([
   {
-    _id: 1001,
-    userId: 1,
+    _id: 1001, userId: 1, status: 'paid', total: 607.90, createdAt: new Date(),
     items: [
       { productId: 101, qty: 1, unitPrice: 349.90 },
       { productId: 102, qty: 2, unitPrice: 129.00 },
     ],
-    total: 607.90,
-    status: 'paid',
-    createdAt: new Date(),
   },
   {
-    _id: 1002,
-    userId: 2,
+    _id: 1002, userId: 2, status: 'pending', total: 1299.00, createdAt: new Date(),
     items: [{ productId: 103, qty: 1, unitPrice: 1299.00 }],
-    total: 1299.00,
-    status: 'pending',
-    createdAt: new Date(),
   },
   {
-    _id: 1003,
-    userId: 3,
+    _id: 1003, userId: 3, status: 'shipped', total: 348.50, createdAt: new Date(),
     items: [
       { productId: 104, qty: 1, unitPrice: 219.50 },
       { productId: 102, qty: 1, unitPrice: 129.00 },
     ],
-    total: 348.50,
-    status: 'shipped',
-    createdAt: new Date(),
   },
-];
-appdb.orders.insertMany(orders);
+]);
 
 // --- confirm seed (visible in `docker logs <container>`) ---
 print('Seed complete for appdb:');
