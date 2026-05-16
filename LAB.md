@@ -31,6 +31,41 @@ database — and so the data survives container removal.
 
 ---
 
+## Setup & Prerequisites
+
+Do this before Part 1.
+
+### Tools
+
+- **Docker** — `docker --version` (engine running: `docker info`)
+- **mongosh** (MongoDB Shell) — `mongosh --version`. Install:
+  <https://www.mongodb.com/docs/mongodb-shell/install/>
+  - Alternative: MongoDB Compass (GUI) instead of `mongosh`.
+
+### Get the repo
+
+```bash
+git clone <repo-url> mongo-docker
+cd mongo-docker
+git branch          # you are on `main` — this is your working branch
+```
+
+- `main` — your working branch (skeleton: stub `Dockerfile`, provided seed).
+- `solution` — reference. `git checkout solution` to peek, then
+  `git checkout main` to return. Try yourself first.
+
+### Connection cheat-sheet
+
+```bash
+# as root (admin) — Parts 1–5
+mongosh "mongodb://root:secret@localhost:27017/?authSource=admin"
+
+# as appuser (scoped to appdb) — Part 6 onward, after the seed runs
+mongosh "mongodb://appuser:appsecret@localhost:27017/appdb"
+```
+
+---
+
 ## Part 1 — Run Stock MongoDB Without Persistence
 
 **Objective:** Get the official `mongo` image running and feel that it is
@@ -47,6 +82,18 @@ ephemeral. (No custom image yet — that's Part 5.)
 3. Confirm it is running (`docker ps`).
 4. Connect with `mongosh` using the root credentials.
 5. Manually create database `appdb`, a `products` collection, and 2–3 docs.
+
+<details><summary>Hint — command shape</summary>
+
+```bash
+docker run -d --name ___ -p ___:27017 \
+  -e MONGO_INITDB_ROOT_USERNAME=___ \
+  -e MONGO_INITDB_ROOT_PASSWORD=___ \
+  mongo:7
+docker ps
+```
+Then connect with the root cheat-sheet line and `db.getSiblingDB("appdb")`.
+</details>
 
 ### Verification
 
@@ -70,6 +117,15 @@ ephemeral. (No custom image yet — that's Part 5.)
 2. **Remove** it completely (`docker rm`).
 3. Run a brand-new `mongo` container with the same settings (still no volume).
 4. Reconnect with `mongosh` and look for your `appdb` / `products` data.
+
+<details><summary>Hint — command shape</summary>
+
+```bash
+docker stop mongo-lab
+docker rm mongo-lab
+# run a fresh `mongo` container again (same as Part 1, no -v)
+```
+</details>
 
 ### Verification
 
@@ -96,6 +152,18 @@ ephemeral. (No custom image yet — that's Part 5.)
    data path (`/data/db`).
 3. Connect with `mongosh` and recreate some sample data.
 
+<details><summary>Hint — command shape</summary>
+
+```bash
+docker volume create ___
+docker run -d --name mongo-lab -p 27017:27017 \
+  -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=secret \
+  -v ___:/data/db \
+  mongo:7
+```
+The mount target is MongoDB's data path — see Part 1 investigation.
+</details>
+
 ### Verification
 
 - `docker volume ls` lists `mongodata`
@@ -118,6 +186,18 @@ ephemeral. (No custom image yet — that's Part 5.)
 2. Run a **brand-new** `mongo` container mounting the **same** `mongodata`
    volume at `/data/db`.
 3. Connect with `mongosh` and check your data.
+
+<details><summary>Hint — command shape</summary>
+
+```bash
+docker stop mongo-lab && docker rm mongo-lab
+# new container, SAME -v mongodata:/data/db
+docker run -d --name mongo-lab -p 27017:27017 \
+  -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=secret \
+  -v mongodata:/data/db \
+  mongo:7
+```
+</details>
 
 ### Verification
 
@@ -153,6 +233,25 @@ MongoDB seeds `appdb` automatically on first start.
    `mongodata` first).
 5. Check `docker logs mongo-lab` for the `Seed complete` output.
 
+<details><summary>Hint — Dockerfile + build</summary>
+
+`Dockerfile`:
+```dockerfile
+FROM mongo:___
+COPY docker-entrypoint-initdb.d/ /docker-entrypoint-initdb.d/
+EXPOSE 27017
+```
+```bash
+docker build -t mongo-lab-img .
+docker rm -f mongo-lab; docker volume rm mongodata; docker volume create mongodata
+docker run -d --name mongo-lab -p 27017:27017 \
+  -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=secret \
+  -v mongodata:/data/db mongo-lab-img
+docker logs mongo-lab | grep -A3 "Seed complete"
+```
+Init runs only on a fresh volume — remove the old one first.
+</details>
+
 ### Verification
 
 - `docker build` succeeds
@@ -183,6 +282,21 @@ connect as the least-privilege `appuser` the seed created.
 3. Try a privileged action outside `appdb` (e.g. list databases or write to
    another DB) and observe `appuser` is denied.
 
+<details><summary>Hint — command shape</summary>
+
+```bash
+mongosh "mongodb://appuser:appsecret@localhost:27017/appdb" --eval '
+  print(db.users.countDocuments());
+  const o = db.orders.findOne();
+  printjson(db.users.findOne({_id: o.userId}));
+'
+# least-privilege check — expect "not authorized":
+mongosh "mongodb://appuser:appsecret@localhost:27017/appdb" --eval '
+  db.getSiblingDB("otherdb").x.insertOne({a:1});
+'
+```
+</details>
+
 ### Verification
 
 - `appuser` connects to `appdb` successfully
@@ -212,6 +326,15 @@ connect as the least-privilege `appuser` the seed created.
 3. Identify the **name**, **mountpoint**, and **driver**.
 4. Research: on a Linux Docker host, which directory holds named-volume data?
 
+<details><summary>Hint — command shape</summary>
+
+```bash
+docker volume ls
+docker volume inspect mongodata
+```
+Read the `Mountpoint` and `Driver` fields from the JSON output.
+</details>
+
 ### Verification
 
 - You can state the mountpoint and driver for the volume
@@ -234,6 +357,20 @@ connect as the least-privilege `appuser` the seed created.
    instead of a named volume.
 2. Inspect the host directory — note you can browse the files directly.
 3. Compare with the named-volume behavior from Parts 3–7.
+
+<details><summary>Hint — command shape</summary>
+
+```bash
+mkdir -p ./hostdata
+docker rm -f mongo-lab
+docker run -d --name mongo-lab -p 27017:27017 \
+  -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=secret \
+  -v "$(pwd)/hostdata:/data/db" \
+  mongo-lab-img
+ls -la ./hostdata    # MongoDB files now visible on the host
+```
+PowerShell: replace `$(pwd)` with `${PWD}`.
+</details>
 
 ### Comparison
 
@@ -264,3 +401,41 @@ You should now be able to explain, with confidence:
   access at the cost of portability and permission safety.
 
 That distinction is one of the most important concepts in real DevOps work.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+| ------- | ------------ | --- |
+| `bind: address already in use` on `-p 27017:27017` | Port taken (local MongoDB or old container) | Stop the other process, or map a different host port: `-p 27018:27017` and connect on `27018` |
+| `docker: ... name "mongo-lab" is already in use` | Old container still exists | `docker rm -f mongo-lab` then re-run |
+| `Authentication failed` in `mongosh` | Wrong creds, or missing `?authSource=admin` for root | Use the exact cheat-sheet URIs in Setup |
+| `Seed complete` never appears in logs | Volume was **not** fresh — init only runs on empty `/data/db` | `docker rm -f mongo-lab; docker volume rm mongodata; docker volume create mongodata`, then re-run |
+| `appuser` auth fails | Seed never ran (see above), so the user was never created | Recreate on a fresh volume so `01-seed.js` runs |
+| `not authorized on otherdb` as `appuser` | **Expected** — least privilege working (Part 6) | Not an error; this is the lesson |
+| Data gone after `docker rm` | No `-v` volume mounted (Parts 1–2) | Mount `-v mongodata:/data/db` (Part 3+) |
+| `mongosh: command not found` | Shell not installed | Install mongosh, or use `docker exec mongo-lab mongosh ...` instead |
+
+---
+
+## Deliverables
+
+Submit the following:
+
+1. **Your `Dockerfile`** (the one you wrote on `main`).
+2. **Command history** — the `docker` / `docker volume` / `mongosh` commands
+   you ran for each part (paste from terminal history or a saved script).
+3. **Evidence of data loss → persistence:**
+   - Part 2: output showing the data is **gone** after `docker rm`.
+   - Part 4: output showing the data **survived** `docker rm` with a volume.
+4. **Seed proof:** the `docker logs` snippet showing `Seed complete`
+   (users: 3, products: 4, orders: 3).
+5. **`appuser` proof:** output of a query run as `appuser`, **and** the
+   `not authorized` error when acting outside `appdb`.
+6. **`docker volume inspect` output** for your volume (name, mountpoint,
+   driver).
+7. **Written answers** to every *Investigation Question* in Parts 1–8.
+
+Submit as a single markdown or PDF file (commands + pasted outputs +
+answers). Screenshots acceptable for terminal output.
